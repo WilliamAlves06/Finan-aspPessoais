@@ -113,14 +113,6 @@ financas-pessoais/
     └── const.ts            # Constantes compartilhadas
 ```
 
----
-
-## 📸 Screenshots
-
-> _Adicione prints do dashboard aqui_
-
----
-
 ## 📄 Licença
 
-MIT © [Seu Nome](https://github.com/seu-usuario)
+MIT © [William Alves](https://github.com/seu-usuario)
