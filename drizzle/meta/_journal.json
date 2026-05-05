@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "mysql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "5",
+      "when": 1773441567761,
+      "tag": "0000_large_puff_adder",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1773441721039,
+      "tag": "0001_mute_maggott",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1775439938555,
+      "tag": "0002_volatile_blue_blade",
+      "breakpoints": true
+    }
+  ]
+}

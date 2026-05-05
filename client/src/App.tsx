@@ -12,6 +12,7 @@ import FixedExpenses from "./pages/FixedExpenses";
 import CreditCards from "./pages/CreditCards";
 import Goals from "./pages/Goals";
 import Alerts from "./pages/Alerts";
+import Insights from "./pages/Insights";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { Loader2 } from "lucide-react";
 
@@ -25,6 +26,8 @@ function ProtectedRouter() {
         <Route path="/credit-cards" component={CreditCards} />
         <Route path="/goals" component={Goals} />
         <Route path="/alerts" component={Alerts} />
+        <Route path="/insights" component={Insights} />
+        <Route path="/404" component={NotFound} />
         <Route component={NotFound} />
       </Switch>
     </DashboardLayout>
@@ -42,11 +45,16 @@ function Router() {
     );
   }
 
-  if (!user) return <Auth />;
+  // Se não está autenticado, mostra a página de login
+  if (!user) {
+    return <Auth />;
+  }
+
+  // Se está autenticado, mostra o dashboard
   return <ProtectedRouter />;
 }
 
-export default function App() {
+function App() {
   return (
     <ErrorBoundary>
       <ThemeProvider defaultTheme="dark">
@@ -58,3 +66,5 @@ export default function App() {
     </ErrorBoundary>
   );
 }
+
+export default App;

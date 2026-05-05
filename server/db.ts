@@ -1,343 +1,364 @@
-import "dotenv/config";
+import { and, desc, eq, gte, isNull, lte, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import mysql from "mysql2/promise";
-import { and, eq, gte, isNull, lte, sql } from "drizzle-orm";
-import bcrypt from "bcryptjs";
 import {
-  users, categories, transactions, fixedExpenses, fixedExpensePayments,
-  creditCards, cardInstallments, goals, goalContributions, alerts,
+  Alert,
+  CardInstallment,
+  Category,
+  CreditCard,
+  FixedExpense,
+  FixedExpensePayment,
+  Goal,
+  GoalContribution,
+  InsertAlert,
+  InsertCardInstallment,
+  InsertCategory,
+  InsertCreditCard,
+  InsertFixedExpense,
+  InsertFixedExpensePayment,
+  InsertGoal,
+  InsertGoalContribution,
+  InsertTransaction,
+  InsertUser,
+  Transaction,
+  alerts,
+  cardInstallments,
+  categories,
+  creditCards,
+  fixedExpensePayments,
+  fixedExpenses,
+  goalContributions,
+  goals,
+  transactions,
+  users,
 } from "../drizzle/schema";
+import { ENV } from "./_core/env";
 
-// ─── Connection ───────────────────────────────────────────────────────────────
-let db: ReturnType<typeof drizzle> | null = null;
+let _db: ReturnType<typeof drizzle> | null = null;
 
 export async function getDb() {
-  if (db) return db;
-  const connection = await mysql.createPool({ uri: process.env.DATABASE_URL! });
-  db = drizzle(connection);
-  return db;
+  if (!_db && process.env.DATABASE_URL) {
+    try {
+      _db = drizzle(process.env.DATABASE_URL);
+    } catch (error) {
+      console.warn("[Database] Failed to connect:", error);
+      _db = null;
+    }
+  }
+  return _db;
 }
 
-// ─── Auth ─────────────────────────────────────────────────────────────────────
+// ─── Users ────────────────────────────────────────────────────────────────────
+export async function upsertUser(user: InsertUser): Promise<void> {
+  if (!user.email) throw new Error("User email is required for upsert");
+  if (!user.password) throw new Error("User password is required for upsert");
+  const db = await getDb();
+  if (!db) { console.warn("[Database] Cannot upsert user: database not available"); return; }
+  try {
+    const values: InsertUser = { email: user.email, password: user.password };
+    const updateSet: Record<string, unknown> = { lastSignedIn: new Date() };
+    if (user.name !== undefined) { 
+      values.name = user.name;
+      updateSet.name = user.name;
+    }
+    if (user.lastSignedIn !== undefined) { 
+      values.lastSignedIn = user.lastSignedIn; 
+      updateSet.lastSignedIn = user.lastSignedIn; 
+    }
+    if (user.role !== undefined) { 
+      values.role = user.role; 
+      updateSet.role = user.role; 
+    }
+    await db.insert(users).values(values).onDuplicateKeyUpdate({ set: updateSet });
+  } catch (error) { console.error("[Database] Failed to upsert user:", error); throw error; }
+}
+
 export async function getUserById(id: number) {
-  const d = await getDb();
-  const rows = await d.select().from(users).where(eq(users.id, id)).limit(1);
-  return rows[0] ?? null;
-}
-
-export async function getUserByEmail(email: string) {
-  const d = await getDb();
-  const rows = await d.select().from(users).where(eq(users.email, email)).limit(1);
-  return rows[0] ?? null;
-}
-
-export async function createUser(email: string, password: string, name: string) {
-  const d = await getDb();
-  const hash = await bcrypt.hash(password, 10);
-  await d.insert(users).values({ email, password: hash, name, role: "user" });
-}
-
-export async function verifyPassword(plain: string, hash: string) {
-  return bcrypt.compare(plain, hash);
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(users).where(eq(users.id, id)).limit(1);
+  return result.length > 0 ? result[0] : undefined;
 }
 
 // ─── Categories ───────────────────────────────────────────────────────────────
-const DEFAULT_CATEGORIES = [
-  { name: "Alimentação", type: "SAIDA" as const },
-  { name: "Transporte", type: "SAIDA" as const },
-  { name: "Moradia", type: "SAIDA" as const },
-  { name: "Saúde", type: "SAIDA" as const },
-  { name: "Lazer", type: "SAIDA" as const },
-  { name: "Educação", type: "SAIDA" as const },
-  { name: "Vestuário", type: "SAIDA" as const },
-  { name: "Outros", type: "AMBOS" as const },
-  { name: "Salário", type: "ENTRADA" as const },
-  { name: "Freelance", type: "ENTRADA" as const },
-];
+export async function getCategoriesByUser(userId: number): Promise<Category[]> {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(categories).where(and(eq(categories.userId, userId), isNull(categories.deletedAt)));
+}
 
-export async function seedDefaultCategories(userId: number) {
-  const d = await getDb();
-  const existing = await d.select().from(categories)
-    .where(and(eq(categories.userId, userId), eq(categories.isDefault, true)));
+export async function createCategory(data: InsertCategory): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.insert(categories).values(data);
+}
+
+export async function seedDefaultCategories(userId: number): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  const existing = await db.select().from(categories).where(and(eq(categories.userId, userId), eq(categories.isDefault, true))).limit(1);
   if (existing.length > 0) return;
-  for (const cat of DEFAULT_CATEGORIES) {
-    await d.insert(categories).values({ userId, name: cat.name, type: cat.type, isDefault: true });
-  }
+  const defaults: InsertCategory[] = [
+    { userId, name: "Salário", type: "ENTRADA", isDefault: true },
+    { userId, name: "Freelance", type: "ENTRADA", isDefault: true },
+    { userId, name: "Dividendos", type: "ENTRADA", isDefault: true },
+    { userId, name: "Aluguel recebido", type: "ENTRADA", isDefault: true },
+    { userId, name: "Outros (entrada)", type: "ENTRADA", isDefault: true },
+    { userId, name: "Alimentação", type: "SAIDA", isDefault: true },
+    { userId, name: "Transporte", type: "SAIDA", isDefault: true },
+    { userId, name: "Saúde", type: "SAIDA", isDefault: true },
+    { userId, name: "Lazer", type: "SAIDA", isDefault: true },
+    { userId, name: "Educação", type: "SAIDA", isDefault: true },
+    { userId, name: "Vestuário", type: "SAIDA", isDefault: true },
+    { userId, name: "Casa", type: "SAIDA", isDefault: true },
+    { userId, name: "Outros (saída)", type: "SAIDA", isDefault: true },
+  ];
+  await db.insert(categories).values(defaults);
 }
 
-export async function getCategoriesByUser(userId: number) {
-  const d = await getDb();
-  return d.select().from(categories)
-    .where(and(eq(categories.userId, userId), isNull(categories.deletedAt)));
-}
-
-export async function createCategory(data: { userId: number; name: string; type: "ENTRADA" | "SAIDA" | "AMBOS"; isDefault: boolean }) {
-  const d = await getDb();
-  await d.insert(categories).values(data);
-}
-
-export async function deleteCategory(id: number, userId: number) {
-  const d = await getDb();
-  await d.update(categories).set({ deletedAt: new Date() })
-    .where(and(eq(categories.id, id), eq(categories.userId, userId)));
+export async function deleteCategory(id: number, userId: number): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(categories).set({ deletedAt: new Date() }).where(and(eq(categories.id, id), eq(categories.userId, userId)));
 }
 
 // ─── Transactions ─────────────────────────────────────────────────────────────
-export async function getTransactionsByMonth(userId: number, year: number, month: number) {
-  const d = await getDb();
-  const from = `${year}-${String(month).padStart(2, "0")}-01`;
-  const lastDay = new Date(year, month, 0).getDate();
-  const to = `${year}-${String(month).padStart(2, "0")}-${lastDay}`;
-  return d.select().from(transactions)
-    .where(and(
-      eq(transactions.userId, userId),
-      isNull(transactions.deletedAt),
-      gte(transactions.date, from as unknown as Date),
-      lte(transactions.date, to as unknown as Date),
-    ));
+export async function getTransactionsByMonth(userId: number, year: number, month: number): Promise<Transaction[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const startDate = `${year}-${String(month).padStart(2, "0")}-01`;
+  const endDate = `${year}-${String(month).padStart(2, "0")}-31`;
+  return db.select().from(transactions).where(
+    and(eq(transactions.userId, userId), isNull(transactions.deletedAt), sql`${transactions.date} >= ${startDate}`, sql`${transactions.date} <= ${endDate}`)
+  ).orderBy(desc(transactions.date));
 }
 
-export async function createTransaction(data: {
-  userId: number; type: "ENTRADA" | "SAIDA"; value: string;
-  date: Date; categoryId: number | null; description: string | null; origin: "MANUAL" | "FIXO" | "CARTAO";
-}) {
-  const d = await getDb();
-  await d.insert(transactions).values(data);
+export async function createTransaction(data: InsertTransaction): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.insert(transactions).values(data);
 }
 
-export async function updateTransaction(id: number, userId: number, data: Partial<{
-  type: "ENTRADA" | "SAIDA"; value: string; date: Date; categoryId: number | null; description: string | null;
-}>) {
-  const d = await getDb();
-  await d.update(transactions).set(data).where(and(eq(transactions.id, id), eq(transactions.userId, userId)));
+export async function updateTransaction(id: number, userId: number, data: Partial<InsertTransaction>): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(transactions).set(data).where(and(eq(transactions.id, id), eq(transactions.userId, userId)));
 }
 
-export async function deleteTransaction(id: number, userId: number) {
-  const d = await getDb();
-  await d.update(transactions).set({ deletedAt: new Date() })
-    .where(and(eq(transactions.id, id), eq(transactions.userId, userId)));
+export async function deleteTransaction(id: number, userId: number): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(transactions).set({ deletedAt: new Date() }).where(and(eq(transactions.id, id), eq(transactions.userId, userId)));
+}
+
+// RN-01: saldo acumulado do mês anterior (calculado on-the-fly)
+export async function getPreviousMonthBalance(userId: number, year: number, month: number): Promise<number> {
+  const db = await getDb();
+  if (!db) return 0;
+  // Soma todas as transações de meses anteriores ao mês dado
+  const prevDate = month === 1 ? `${year - 1}-12-31` : `${year}-${String(month - 1).padStart(2, "0")}-31`;
+  const rows = await db.select({
+    type: transactions.type,
+    total: sql<string>`SUM(CAST(${transactions.value} AS DECIMAL(10,2)))`,
+  }).from(transactions).where(
+    and(eq(transactions.userId, userId), isNull(transactions.deletedAt), sql`${transactions.date} <= ${prevDate}`)
+  ).groupBy(transactions.type);
+  let balance = 0;
+  for (const row of rows) {
+    const val = parseFloat(row.total ?? "0");
+    if (row.type === "ENTRADA") balance += val;
+    else balance -= val;
+  }
+  return balance;
 }
 
 // ─── Fixed Expenses ───────────────────────────────────────────────────────────
-export async function getFixedExpensesByUser(userId: number) {
-  const d = await getDb();
-  return d.select().from(fixedExpenses)
-    .where(and(eq(fixedExpenses.userId, userId), isNull(fixedExpenses.deletedAt)));
+export async function getFixedExpensesByUser(userId: number): Promise<FixedExpense[]> {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(fixedExpenses).where(and(eq(fixedExpenses.userId, userId), isNull(fixedExpenses.deletedAt))).orderBy(fixedExpenses.dueDay);
 }
 
-export async function createFixedExpense(data: {
-  userId: number; name: string; value: string; dueDay: number;
-  categoryId: number | null; active: boolean; startDate: Date; endDate: Date | null;
-}) {
-  const d = await getDb();
-  await d.insert(fixedExpenses).values(data);
+export async function createFixedExpense(data: InsertFixedExpense): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.insert(fixedExpenses).values(data);
 }
 
-export async function updateFixedExpense(id: number, userId: number, data: Partial<{
-  name: string; value: string; dueDay: number; categoryId: number | null; active: boolean; endDate: Date | null;
-}>) {
-  const d = await getDb();
-  await d.update(fixedExpenses).set(data).where(and(eq(fixedExpenses.id, id), eq(fixedExpenses.userId, userId)));
+export async function updateFixedExpense(id: number, userId: number, data: Partial<InsertFixedExpense>): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(fixedExpenses).set(data).where(and(eq(fixedExpenses.id, id), eq(fixedExpenses.userId, userId)));
 }
 
-export async function deleteFixedExpense(id: number, userId: number) {
-  const d = await getDb();
-  await d.update(fixedExpenses).set({ deletedAt: new Date() })
-    .where(and(eq(fixedExpenses.id, id), eq(fixedExpenses.userId, userId)));
+export async function deleteFixedExpense(id: number, userId: number): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(fixedExpenses).set({ deletedAt: new Date() }).where(and(eq(fixedExpenses.id, id), eq(fixedExpenses.userId, userId)));
 }
 
-export async function getFixedExpensePayments(userId: number, referenceMonth: string) {
-  const d = await getDb();
-  return d.select().from(fixedExpensePayments)
-    .where(and(eq(fixedExpensePayments.userId, userId), eq(fixedExpensePayments.referenceMonth, referenceMonth)));
+export async function getFixedExpensePayments(userId: number, referenceMonth: string): Promise<FixedExpensePayment[]> {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(fixedExpensePayments).where(and(eq(fixedExpensePayments.userId, userId), eq(fixedExpensePayments.referenceMonth, referenceMonth)));
 }
 
-export async function upsertFixedExpensePayment(fixedExpenseId: number, userId: number, referenceMonth: string, paid: boolean) {
-  const d = await getDb();
-  const existing = await d.select().from(fixedExpensePayments)
-    .where(and(
-      eq(fixedExpensePayments.fixedExpenseId, fixedExpenseId),
-      eq(fixedExpensePayments.userId, userId),
-      eq(fixedExpensePayments.referenceMonth, referenceMonth),
-    )).limit(1);
+export async function upsertFixedExpensePayment(fixedExpenseId: number, userId: number, referenceMonth: string, paid: boolean): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  const existing = await db.select().from(fixedExpensePayments).where(
+    and(eq(fixedExpensePayments.fixedExpenseId, fixedExpenseId), eq(fixedExpensePayments.userId, userId), eq(fixedExpensePayments.referenceMonth, referenceMonth))
+  ).limit(1);
   if (existing.length > 0) {
-    await d.update(fixedExpensePayments)
-      .set({ paid, paidAt: paid ? new Date() : null })
-      .where(eq(fixedExpensePayments.id, existing[0].id));
+    await db.update(fixedExpensePayments).set({ paid, paidAt: paid ? new Date() : null }).where(eq(fixedExpensePayments.id, existing[0].id));
   } else {
-    await d.insert(fixedExpensePayments).values({
-      fixedExpenseId, userId, referenceMonth, paid, paidAt: paid ? new Date() : null,
-    });
+    await db.insert(fixedExpensePayments).values({ fixedExpenseId, userId, referenceMonth, paid, paidAt: paid ? new Date() : null });
   }
 }
 
 // ─── Credit Cards ─────────────────────────────────────────────────────────────
-export async function getCreditCardsByUser(userId: number) {
-  const d = await getDb();
-  return d.select().from(creditCards)
-    .where(and(eq(creditCards.userId, userId), isNull(creditCards.deletedAt)));
+export async function getCreditCardsByUser(userId: number): Promise<CreditCard[]> {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(creditCards).where(and(eq(creditCards.userId, userId), isNull(creditCards.deletedAt)));
 }
 
-export async function createCreditCard(data: {
-  userId: number; name: string; limit: string; closingDay: number; dueDay: number; active: boolean;
-}) {
-  const d = await getDb();
-  await d.insert(creditCards).values(data);
+export async function createCreditCard(data: InsertCreditCard): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.insert(creditCards).values(data);
 }
 
-export async function updateCreditCard(id: number, userId: number, data: Partial<{
-  name: string; limit: string; closingDay: number; dueDay: number; active: boolean;
-}>) {
-  const d = await getDb();
-  await d.update(creditCards).set(data).where(and(eq(creditCards.id, id), eq(creditCards.userId, userId)));
+export async function updateCreditCard(id: number, userId: number, data: Partial<InsertCreditCard>): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(creditCards).set(data).where(and(eq(creditCards.id, id), eq(creditCards.userId, userId)));
 }
 
-export async function deleteCreditCard(id: number, userId: number) {
-  const d = await getDb();
-  await d.update(creditCards).set({ deletedAt: new Date() })
-    .where(and(eq(creditCards.id, id), eq(creditCards.userId, userId)));
+export async function deleteCreditCard(id: number, userId: number): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(creditCards).set({ deletedAt: new Date() }).where(and(eq(creditCards.id, id), eq(creditCards.userId, userId)));
 }
 
-export async function createCardInstallments(rows: Array<{
-  cardId: number; userId: number; description: string; totalValue: string;
-  installmentValue: string; currentInstallment: number; totalInstallments: number;
-  referenceMonth: string; categoryId: number | null; paid: boolean; purchaseGroupId: string;
-}>) {
-  const d = await getDb();
-  await d.insert(cardInstallments).values(rows);
+export async function getInstallmentsByMonth(userId: number, referenceMonth: string): Promise<CardInstallment[]> {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(cardInstallments).where(
+    and(eq(cardInstallments.userId, userId), eq(cardInstallments.referenceMonth, referenceMonth), isNull(cardInstallments.deletedAt))
+  );
 }
 
-export async function getInstallmentsByMonth(userId: number, referenceMonth: string) {
-  const d = await getDb();
-  return d.select().from(cardInstallments)
-    .where(and(
-      eq(cardInstallments.userId, userId),
-      eq(cardInstallments.referenceMonth, referenceMonth),
-      isNull(cardInstallments.deletedAt),
-    ));
+export async function getInstallmentsByCard(cardId: number, userId: number): Promise<CardInstallment[]> {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(cardInstallments).where(
+    and(eq(cardInstallments.cardId, cardId), eq(cardInstallments.userId, userId), isNull(cardInstallments.deletedAt))
+  ).orderBy(cardInstallments.currentInstallment);
 }
 
-export async function getInstallmentsByCard(cardId: number, userId: number) {
-  const d = await getDb();
-  return d.select().from(cardInstallments)
-    .where(and(
-      eq(cardInstallments.cardId, cardId),
-      eq(cardInstallments.userId, userId),
-      isNull(cardInstallments.deletedAt),
-    ));
+export async function createCardInstallments(installments: InsertCardInstallment[]): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.insert(cardInstallments).values(installments);
 }
 
-export async function deleteCardPurchase(purchaseGroupId: string, userId: number) {
-  const d = await getDb();
-  await d.update(cardInstallments).set({ deletedAt: new Date() })
-    .where(and(eq(cardInstallments.purchaseGroupId, purchaseGroupId), eq(cardInstallments.userId, userId)));
+export async function deleteCardPurchase(purchaseGroupId: string, userId: number): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(cardInstallments).set({ deletedAt: new Date() }).where(
+    and(eq(cardInstallments.purchaseGroupId, purchaseGroupId), eq(cardInstallments.userId, userId))
+  );
 }
 
 // ─── Goals ────────────────────────────────────────────────────────────────────
-export async function getGoalsByUser(userId: number) {
-  const d = await getDb();
-  return d.select().from(goals)
-    .where(and(eq(goals.userId, userId), isNull(goals.deletedAt)));
+export async function getGoalsByUser(userId: number): Promise<Goal[]> {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(goals).where(and(eq(goals.userId, userId), isNull(goals.deletedAt))).orderBy(goals.priority);
 }
 
-export async function createGoal(data: {
-  userId: number; name: string; targetValue: string; accumulatedValue: string;
-  priority: number; targetDate: Date | null; completed: boolean;
-}) {
-  const d = await getDb();
-  await d.insert(goals).values(data);
+export async function createGoal(data: InsertGoal): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.insert(goals).values(data);
 }
 
-export async function updateGoal(id: number, userId: number, data: Partial<{
-  name: string; targetValue: string; accumulatedValue: string; priority: number;
-  targetDate: Date | null; completed: boolean;
-}>) {
-  const d = await getDb();
-  await d.update(goals).set(data).where(and(eq(goals.id, id), eq(goals.userId, userId)));
+export async function updateGoal(id: number, userId: number, data: Partial<InsertGoal>): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(goals).set(data).where(and(eq(goals.id, id), eq(goals.userId, userId)));
 }
 
-export async function deleteGoal(id: number, userId: number) {
-  const d = await getDb();
-  await d.update(goals).set({ deletedAt: new Date() })
-    .where(and(eq(goals.id, id), eq(goals.userId, userId)));
+export async function deleteGoal(id: number, userId: number): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(goals).set({ deletedAt: new Date() }).where(and(eq(goals.id, id), eq(goals.userId, userId)));
 }
 
-export async function createGoalContribution(data: {
-  goalId: number; userId: number; value: string; date: Date; note: string | null;
-}) {
-  const d = await getDb();
-  await d.insert(goalContributions).values(data);
-  // Update accumulated value
-  const contribs = await d.select().from(goalContributions).where(eq(goalContributions.goalId, data.goalId));
-  const total = contribs.reduce((s, c) => s + parseFloat(String(c.value)), 0);
-  await d.update(goals).set({ accumulatedValue: String(total) }).where(eq(goals.id, data.goalId));
+export async function getGoalContributions(goalId: number, userId: number): Promise<GoalContribution[]> {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(goalContributions).where(and(eq(goalContributions.goalId, goalId), eq(goalContributions.userId, userId))).orderBy(desc(goalContributions.createdAt));
 }
 
-export async function getGoalContributions(goalId: number, userId: number) {
-  const d = await getDb();
-  return d.select().from(goalContributions)
-    .where(and(eq(goalContributions.goalId, goalId), eq(goalContributions.userId, userId)));
+export async function createGoalContribution(data: InsertGoalContribution): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.insert(goalContributions).values(data);
+  // Atualiza valor acumulado na meta
+  const allContribs = await getGoalContributions(data.goalId, data.userId);
+  const total = allContribs.reduce((sum, c) => sum + parseFloat(String(c.value)), 0);
+  await db.update(goals).set({ accumulatedValue: String(total) }).where(eq(goals.id, data.goalId));
 }
 
-export async function getRecentContributionsByGoal(goalId: number, userId: number, months = 3) {
-  const d = await getDb();
-  const since = new Date();
-  since.setMonth(since.getMonth() - months);
-  return d.select().from(goalContributions)
-    .where(and(
-      eq(goalContributions.goalId, goalId),
-      eq(goalContributions.userId, userId),
-      gte(goalContributions.date, since as unknown as Date),
-    ));
+export async function getRecentContributionsByGoal(goalId: number, userId: number, months: number = 3): Promise<GoalContribution[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const cutoff = new Date();
+  cutoff.setMonth(cutoff.getMonth() - months);
+  const cutoffStr = cutoff.toISOString().split("T")[0];
+  return db.select().from(goalContributions).where(
+    and(eq(goalContributions.goalId, goalId), eq(goalContributions.userId, userId), sql`${goalContributions.date} >= ${cutoffStr}`)
+  );
 }
 
 // ─── Alerts ───────────────────────────────────────────────────────────────────
-export async function getActiveAlerts(userId: number) {
-  const d = await getDb();
-  return d.select().from(alerts)
-    .where(and(eq(alerts.userId, userId), eq(alerts.dismissed, false)));
+export async function getActiveAlerts(userId: number): Promise<Alert[]> {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(alerts).where(and(eq(alerts.userId, userId), eq(alerts.dismissed, false))).orderBy(desc(alerts.createdAt));
 }
 
-export async function createAlert(data: {
-  userId: number;
-  type: "NEGATIVE_BALANCE" | "LOW_BALANCE" | "FIXED_DUE_SOON" | "HIGH_INSTALLMENTS" | "GOAL_NO_CONTRIBUTION" | "CARD_DUE_SOON";
-  priority: "HIGH" | "MEDIUM" | "LOW";
-  message: string;
-  referenceMonth: string;
-}) {
-  const d = await getDb();
-  await d.insert(alerts).values({ ...data, dismissed: false });
+export async function createAlert(data: InsertAlert): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.insert(alerts).values(data);
 }
 
-export async function clearAlertsForMonth(userId: number, referenceMonth: string) {
-  const d = await getDb();
-  await d.update(alerts).set({ dismissed: true })
-    .where(and(eq(alerts.userId, userId), eq(alerts.referenceMonth, referenceMonth)));
+export async function dismissAlert(id: number, userId: number): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(alerts).set({ dismissed: true }).where(and(eq(alerts.id, id), eq(alerts.userId, userId)));
 }
 
-export async function dismissAlert(id: number, userId: number) {
-  const d = await getDb();
-  await d.update(alerts).set({ dismissed: true })
-    .where(and(eq(alerts.id, id), eq(alerts.userId, userId)));
+export async function markAlertNotificationSent(id: number): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(alerts).set({ notificationSent: true }).where(eq(alerts.id, id));
 }
 
-// ─── Dashboard helpers ────────────────────────────────────────────────────────
-export async function getPreviousMonthBalance(userId: number, year: number, month: number) {
-  // Sum of all ENTRADA - SAIDA - fixedExpenses - cardInstallments before this month
-  const d = await getDb();
-  const to = new Date(year, month - 1, 0); // last day of previous month
+export async function clearAlertsForMonth(userId: number, referenceMonth: string): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(alerts).set({ dismissed: true }).where(
+    and(eq(alerts.userId, userId), eq(alerts.referenceMonth, referenceMonth), eq(alerts.dismissed, false))
+  );
+}
 
-  const txRows = await d.select().from(transactions)
-    .where(and(
-      eq(transactions.userId, userId),
-      isNull(transactions.deletedAt),
-      lte(transactions.date, to as unknown as Date),
-    ));
-
-  const txBalance = txRows.reduce((s, t) => {
-    const v = parseFloat(String(t.value));
-    return t.type === "ENTRADA" ? s + v : s - v;
-  }, 0);
-
-  return txBalance;
+export async function getUnsentAlerts(userId: number): Promise<Alert[]> {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(alerts).where(
+    and(eq(alerts.userId, userId), eq(alerts.notificationSent, false), eq(alerts.dismissed, false))
+  );
 }

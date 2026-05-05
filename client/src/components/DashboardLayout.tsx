@@ -27,6 +27,7 @@ import {
   LayoutDashboard,
   LogOut,
   PanelLeft,
+  Sparkles,
   Target,
   TrendingUp,
   Wallet,
@@ -37,6 +38,7 @@ import { DashboardLayoutSkeleton } from "./DashboardLayoutSkeleton";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import { trpc } from "@/lib/trpc";
+import type { Alert } from "@shared/types";
 
 const menuItems = [
   { icon: LayoutDashboard, label: "Dashboard", path: "/" },
@@ -45,7 +47,7 @@ const menuItems = [
   { icon: CreditCard, label: "Cartões", path: "/credit-cards" },
   { icon: Target, label: "Grandes Compras", path: "/goals" },
   { icon: AlertTriangle, label: "Alertas", path: "/alerts" },
-
+  { icon: Sparkles, label: "Insights IA", path: "/insights" },
 ];
 
 const SIDEBAR_WIDTH_KEY = "sidebar-width";
@@ -99,7 +101,7 @@ function DashboardLayoutContent({
 
   // Alert count badge
   const { data: alerts } = trpc.dashboard.getAlerts.useQuery(undefined, { refetchInterval: 60000 });
-  const alertCount = alerts?.filter((a) => !a.dismissed).length ?? 0;
+  const alertCount = (alerts as Alert[])?.filter((a: Alert) => !a.dismissed).length ?? 0;
 
   useEffect(() => {
     if (isCollapsed) setIsResizing(false);

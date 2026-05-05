@@ -77,12 +77,17 @@ export default function Dashboard() {
   const { data: history } = trpc.dashboard.balanceHistory.useQuery();
   const { data: alerts } = trpc.dashboard.getAlerts.useQuery();
   const { data: categories } = trpc.transactions.listCategories.useQuery();
-  const generateAlerts = trpc.dashboard.generateAlerts.useMutation({ onSuccess: () => refetch() });
+  const generateAlerts = trpc.dashboard.generateAlerts.useMutation({
+    onSuccess: (data) => {
+      toast.success(`${data.generated} alerta(s) gerado(s) para o mês.`);
+      refetch();
+    },
+  });
 
   // Auto-gera alertas ao mudar de mês
   useEffect(() => {
     generateAlerts.mutate({ year, month });
-  }, [year, month]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [year, month]);
 
   const catMap = Object.fromEntries((categories ?? []).map((c) => [c.id, c.name]));
 

@@ -1,12 +1,13 @@
 import type { CreateExpressContextOptions } from "@trpc/server/adapters/express";
-import { jwtVerify } from "jose";
-import { parse as parseCookies } from "cookie";
-import { COOKIE_NAME } from "@shared/const";
-import { ENV } from "./env";
-import { getUserById } from "../db";
 import type { User } from "../../drizzle/schema";
+import { jwtVerify } from "jose";
+import { parse as parseCookieHeader } from "cookie";
+import { COOKIE_NAME } from "@shared/const";
+import { getUserById } from "../db";
 
-const JWT_SECRET = new TextEncoder().encode(ENV.jwtSecret);
+const JWT_SECRET = new TextEncoder().encode(
+  process.env.JWT_SECRET || "seu-secret-super-seguro"
+);
 
 export type TrpcContext = {
   req: CreateExpressContextOptions["req"];
@@ -14,20 +15,32 @@ export type TrpcContext = {
   user: User | null;
 };
 
-export async function createContext(opts: CreateExpressContextOptions): Promise<TrpcContext> {
+export async function createContext(
+  opts: CreateExpressContextOptions
+): Promise<TrpcContext> {
   let user: User | null = null;
+
   try {
-    const cookies = parseCookies(opts.req.headers.cookie ?? "");
+    const cookieHeader = opts.req.headers.cookie ?? "";
+    const cookies = parseCookieHeader(cookieHeader);
     const token = cookies[COOKIE_NAME];
+
     if (token) {
       const { payload } = await jwtVerify(token, JWT_SECRET);
       const userId = payload.userId as number | undefined;
+
       if (userId) {
-        user = (await getUserById(userId)) ?? null;
+        const found = await getUserById(userId);
+        user = found ?? null;
       }
     }
   } catch {
     user = null;
   }
-  return { req: opts.req, res: opts.res, user };
+
+  return {
+    req: opts.req,
+    res: opts.res,
+    user,
+  };
 }

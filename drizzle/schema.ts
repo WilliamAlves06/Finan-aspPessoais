@@ -14,11 +14,12 @@ import {
 export const users = mysqlTable("users", {
   id: int("id").autoincrement().primaryKey(),
   email: varchar("email", { length: 320 }).notNull().unique(),
-  password: varchar("password", { length: 255 }).notNull(),
+  password: varchar("password", { length: 255 }).notNull(), // Hash bcrypt
   name: text("name"),
   role: mysqlEnum("role", ["user", "admin"]).default("user").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
 });
 
 export type User = typeof users.$inferSelect;
@@ -35,6 +36,7 @@ export const categories = mysqlTable("categories", {
 });
 
 export type Category = typeof categories.$inferSelect;
+export type InsertCategory = typeof categories.$inferInsert;
 
 // ─── Transactions ─────────────────────────────────────────────────────────────
 export const transactions = mysqlTable("transactions", {
@@ -46,11 +48,13 @@ export const transactions = mysqlTable("transactions", {
   categoryId: int("categoryId"),
   description: text("description"),
   origin: mysqlEnum("origin", ["MANUAL", "FIXO", "CARTAO"]).notNull().default("MANUAL"),
+  referenceId: int("referenceId"),
   deletedAt: timestamp("deletedAt"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
 export type Transaction = typeof transactions.$inferSelect;
+export type InsertTransaction = typeof transactions.$inferInsert;
 
 // ─── Fixed Expenses ───────────────────────────────────────────────────────────
 export const fixedExpenses = mysqlTable("fixedExpenses", {
@@ -58,7 +62,7 @@ export const fixedExpenses = mysqlTable("fixedExpenses", {
   userId: int("userId").notNull(),
   name: varchar("name", { length: 150 }).notNull(),
   value: decimal("value", { precision: 10, scale: 2 }).notNull(),
-  dueDay: int("dueDay").notNull(),
+  dueDay: int("dueDay").notNull(), // 1-31
   categoryId: int("categoryId"),
   active: boolean("active").default(true).notNull(),
   startDate: date("startDate").notNull(),
@@ -68,18 +72,20 @@ export const fixedExpenses = mysqlTable("fixedExpenses", {
 });
 
 export type FixedExpense = typeof fixedExpenses.$inferSelect;
+export type InsertFixedExpense = typeof fixedExpenses.$inferInsert;
 
-// ─── Fixed Expense Payments ───────────────────────────────────────────────────
+// ─── Fixed Expense Payments (quitação mensal) ─────────────────────────────────
 export const fixedExpensePayments = mysqlTable("fixedExpensePayments", {
   id: int("id").autoincrement().primaryKey(),
   fixedExpenseId: int("fixedExpenseId").notNull(),
   userId: int("userId").notNull(),
-  referenceMonth: varchar("referenceMonth", { length: 7 }).notNull(),
+  referenceMonth: varchar("referenceMonth", { length: 7 }).notNull(), // YYYY-MM
   paidAt: timestamp("paidAt"),
   paid: boolean("paid").default(false).notNull(),
 });
 
 export type FixedExpensePayment = typeof fixedExpensePayments.$inferSelect;
+export type InsertFixedExpensePayment = typeof fixedExpensePayments.$inferInsert;
 
 // ─── Credit Cards ─────────────────────────────────────────────────────────────
 export const creditCards = mysqlTable("creditCards", {
@@ -87,14 +93,15 @@ export const creditCards = mysqlTable("creditCards", {
   userId: int("userId").notNull(),
   name: varchar("name", { length: 100 }).notNull(),
   limit: decimal("limit", { precision: 10, scale: 2 }).notNull(),
-  closingDay: int("closingDay").notNull(),
-  dueDay: int("dueDay").notNull(),
+  closingDay: int("closingDay").notNull(), // dia de fechamento
+  dueDay: int("dueDay").notNull(), // dia de vencimento
   active: boolean("active").default(true).notNull(),
   deletedAt: timestamp("deletedAt"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
 export type CreditCard = typeof creditCards.$inferSelect;
+export type InsertCreditCard = typeof creditCards.$inferInsert;
 
 // ─── Card Installments ────────────────────────────────────────────────────────
 export const cardInstallments = mysqlTable("cardInstallments", {
@@ -106,24 +113,25 @@ export const cardInstallments = mysqlTable("cardInstallments", {
   installmentValue: decimal("installmentValue", { precision: 10, scale: 2 }).notNull(),
   currentInstallment: int("currentInstallment").notNull(),
   totalInstallments: int("totalInstallments").notNull(),
-  referenceMonth: varchar("referenceMonth", { length: 7 }).notNull(),
+  referenceMonth: varchar("referenceMonth", { length: 7 }).notNull(), // YYYY-MM
   categoryId: int("categoryId"),
   paid: boolean("paid").default(false).notNull(),
-  purchaseGroupId: varchar("purchaseGroupId", { length: 64 }),
+  purchaseGroupId: varchar("purchaseGroupId", { length: 64 }), // agrupa parcelas da mesma compra
   deletedAt: timestamp("deletedAt"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
 export type CardInstallment = typeof cardInstallments.$inferSelect;
+export type InsertCardInstallment = typeof cardInstallments.$inferInsert;
 
-// ─── Goals ────────────────────────────────────────────────────────────────────
+// ─── Goals (Grandes Compras) ──────────────────────────────────────────────────
 export const goals = mysqlTable("goals", {
   id: int("id").autoincrement().primaryKey(),
   userId: int("userId").notNull(),
   name: varchar("name", { length: 150 }).notNull(),
   targetValue: decimal("targetValue", { precision: 10, scale: 2 }).notNull(),
   accumulatedValue: decimal("accumulatedValue", { precision: 10, scale: 2 }).default("0").notNull(),
-  priority: int("priority").default(3).notNull(),
+  priority: int("priority").default(3).notNull(), // 1-5
   targetDate: date("targetDate"),
   completed: boolean("completed").default(false).notNull(),
   deletedAt: timestamp("deletedAt"),
@@ -131,6 +139,7 @@ export const goals = mysqlTable("goals", {
 });
 
 export type Goal = typeof goals.$inferSelect;
+export type InsertGoal = typeof goals.$inferInsert;
 
 // ─── Goal Contributions ───────────────────────────────────────────────────────
 export const goalContributions = mysqlTable("goalContributions", {
@@ -144,6 +153,7 @@ export const goalContributions = mysqlTable("goalContributions", {
 });
 
 export type GoalContribution = typeof goalContributions.$inferSelect;
+export type InsertGoalContribution = typeof goalContributions.$inferInsert;
 
 // ─── Alerts ───────────────────────────────────────────────────────────────────
 export const alerts = mysqlTable("alerts", {
@@ -159,9 +169,11 @@ export const alerts = mysqlTable("alerts", {
   ]).notNull(),
   priority: mysqlEnum("priority", ["HIGH", "MEDIUM", "LOW"]).notNull().default("MEDIUM"),
   message: text("message").notNull(),
-  referenceMonth: varchar("referenceMonth", { length: 7 }),
+  referenceMonth: varchar("referenceMonth", { length: 7 }), // YYYY-MM
   dismissed: boolean("dismissed").default(false).notNull(),
+  notificationSent: boolean("notificationSent").default(false).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
 export type Alert = typeof alerts.$inferSelect;
+export type InsertAlert = typeof alerts.$inferInsert;

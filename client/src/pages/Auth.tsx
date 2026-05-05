@@ -11,34 +11,45 @@ export default function Auth() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
-  const utils = trpc.useUtils();
-
-  const onSuccess = () => {
-    utils.auth.me.invalidate();
-  };
 
   const loginMutation = trpc.auth.login.useMutation({
-    onSuccess,
-    onError: (err) => toast.error(err.message || "Erro ao fazer login"),
+    onSuccess: () => {
+      toast.success("Login realizado!");
+      window.location.reload();
+    },
+    onError: (err) => {
+      toast.error(err.message || "Erro ao fazer login");
+    },
   });
 
   const registerMutation = trpc.auth.register.useMutation({
-    onSuccess,
-    onError: (err) => toast.error(err.message || "Erro ao cadastrar"),
+    onSuccess: () => {
+      toast.success("Cadastro realizado! Você já está logado.");
+      window.location.reload();
+    },
+    onError: (err) => {
+      toast.error(err.message || "Erro ao cadastrar");
+    },
   });
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email || !password) { toast.error("Preencha todos os campos"); return; }
+    
+    if (!email || !password) {
+      toast.error("Preencha todos os campos");
+      return;
+    }
+
     if (isLogin) {
       loginMutation.mutate({ email, password });
     } else {
-      if (!name) { toast.error("Preencha o nome"); return; }
+      if (!name) {
+        toast.error("Preencha o nome");
+        return;
+      }
       registerMutation.mutate({ email, password, name });
     }
   };
-
-  const pending = loginMutation.isPending || registerMutation.isPending;
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4"
@@ -51,7 +62,9 @@ export default function Auth() {
               <BarChart3 className="w-6 h-6 text-white" />
             </div>
           </div>
-          <CardTitle className="text-2xl">{isLogin ? "Login" : "Cadastro"}</CardTitle>
+          <CardTitle className="text-2xl gradient-text">
+            {isLogin ? "Login" : "Cadastro"}
+          </CardTitle>
           <p className="text-xs text-muted-foreground mt-2">
             {isLogin ? "Acesse seu painel financeiro" : "Crie sua conta para começar"}
           </p>
@@ -59,16 +72,47 @@ export default function Auth() {
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
             {!isLogin && (
-              <Input placeholder="Seu nome" value={name} onChange={e => setName(e.target.value)} disabled={pending} />
+              <Input
+                placeholder="Seu nome"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                disabled={registerMutation.isPending}
+              />
             )}
-            <Input type="email" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} disabled={pending} />
-            <Input type="password" placeholder="Senha" value={password} onChange={e => setPassword(e.target.value)} disabled={pending} />
-            <Button type="submit" className="w-full font-semibold" disabled={pending}
-              style={{ background: "linear-gradient(135deg, oklch(0.65 0.18 35), oklch(0.58 0.20 28))" }}>
-              {pending ? "Carregando..." : isLogin ? "Entrar" : "Cadastrar"}
+            <Input
+              type="email"
+              placeholder="Email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              disabled={loginMutation.isPending || registerMutation.isPending}
+            />
+            <Input
+              type="password"
+              placeholder="Senha"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              disabled={loginMutation.isPending || registerMutation.isPending}
+            />
+            <Button
+              type="submit"
+              className="w-full font-semibold"
+              disabled={loginMutation.isPending || registerMutation.isPending}
+              style={{ background: "linear-gradient(135deg, oklch(0.65 0.18 35), oklch(0.58 0.20 28))" }}
+            >
+              {loginMutation.isPending || registerMutation.isPending 
+                ? "Carregando..." 
+                : isLogin ? "Entrar" : "Cadastrar"}
             </Button>
-            <button type="button" onClick={() => { setIsLogin(!isLogin); setEmail(""); setPassword(""); setName(""); }}
-              className="w-full text-sm text-muted-foreground hover:text-foreground transition-colors">
+            <button
+              type="button"
+              onClick={() => {
+                setIsLogin(!isLogin);
+                setEmail("");
+                setPassword("");
+                setName("");
+              }}
+              className="w-full text-sm text-muted-foreground hover:text-foreground transition-colors"
+            >
               {isLogin ? "Não tem conta? Cadastre-se" : "Já tem conta? Faça login"}
             </button>
           </form>
