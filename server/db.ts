@@ -1,5 +1,6 @@
 import { and, desc, eq, gte, isNull, lte, or, sql } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/mysql2";
+import { drizzle } from "drizzle-orm/node-postgres";
+import { Pool } from "pg";
 import {
   Alert,
   CardInstallment,
@@ -33,12 +34,25 @@ import {
 } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
+// The Neon integration provides NEON_DATABASE_URL (pooled). We also accept a
+// plain DATABASE_URL so the same code works locally and on other hosts.
+const CONNECTION_STRING =
+  process.env.DATABASE_URL ??
+  process.env.NEON_DATABASE_URL ??
+  process.env.POSTGRES_URL ??
+  "";
+
 let _db: ReturnType<typeof drizzle> | null = null;
+let _pool: Pool | null = null;
 
 export async function getDb() {
-  if (!_db && process.env.DATABASE_URL) {
+  if (!_db && CONNECTION_STRING) {
     try {
-      _db = drizzle(process.env.DATABASE_URL);
+      _pool = new Pool({
+        connectionString: CONNECTION_STRING,
+        ssl: { rejectUnauthorized: false },
+      });
+      _db = drizzle(_pool);
     } catch (error) {
       console.warn("[Database] Failed to connect:", error);
       _db = null;
@@ -68,7 +82,7 @@ export async function upsertUser(user: InsertUser): Promise<void> {
       values.role = user.role; 
       updateSet.role = user.role; 
     }
-    await db.insert(users).values(values).onDuplicateKeyUpdate({ set: updateSet });
+    await db.insert(users).values(values).onConflictDoUpdate({ target: users.email, set: updateSet });
   } catch (error) { console.error("[Database] Failed to upsert user:", error); throw error; }
 }
 
@@ -126,9 +140,12 @@ export async function getTransactionsByMonth(userId: number, year: number, month
   const db = await getDb();
   if (!db) return [];
   const startDate = `${year}-${String(month).padStart(2, "0")}-01`;
-  const endDate = `${year}-${String(month).padStart(2, "0")}-31`;
+  // Exclusive upper bound = first day of next month (Postgres rejects invalid dates like "-31").
+  const nextMonth = month === 12 ? 1 : month + 1;
+  const nextYear = month === 12 ? year + 1 : year;
+  const endDateExclusive = `${nextYear}-${String(nextMonth).padStart(2, "0")}-01`;
   return db.select().from(transactions).where(
-    and(eq(transactions.userId, userId), isNull(transactions.deletedAt), sql`${transactions.date} >= ${startDate}`, sql`${transactions.date} <= ${endDate}`)
+    and(eq(transactions.userId, userId), isNull(transactions.deletedAt), sql`${transactions.date} >= ${startDate}`, sql`${transactions.date} < ${endDateExclusive}`)
   ).orderBy(desc(transactions.date));
 }
 
@@ -154,13 +171,13 @@ export async function deleteTransaction(id: number, userId: number): Promise<voi
 export async function getPreviousMonthBalance(userId: number, year: number, month: number): Promise<number> {
   const db = await getDb();
   if (!db) return 0;
-  // Soma todas as transações de meses anteriores ao mês dado
-  const prevDate = month === 1 ? `${year - 1}-12-31` : `${year}-${String(month - 1).padStart(2, "0")}-31`;
+  // Soma todas as transações anteriores ao primeiro dia do mês informado.
+  const startOfMonth = `${year}-${String(month).padStart(2, "0")}-01`;
   const rows = await db.select({
     type: transactions.type,
     total: sql<string>`SUM(CAST(${transactions.value} AS DECIMAL(10,2)))`,
   }).from(transactions).where(
-    and(eq(transactions.userId, userId), isNull(transactions.deletedAt), sql`${transactions.date} <= ${prevDate}`)
+    and(eq(transactions.userId, userId), isNull(transactions.deletedAt), sql`${transactions.date} < ${startOfMonth}`)
   ).groupBy(transactions.type);
   let balance = 0;
   for (const row of rows) {
